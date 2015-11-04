@@ -1,14 +1,14 @@
 from setuptools import setup
 
 setup(
-    name='merra-get',
+    name='weather-get',
     version='0.1',
-    py_modules=['merra_get'],
+    py_modules=['weather_get'],
     install_requires=[
         'Click',
     ],
     entry_points='''
         [console_scripts]
-        merra-get=merra_get:cli
+        wdata=weather_get:cli
     ''',
 )
