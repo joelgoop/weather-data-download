@@ -3,6 +3,7 @@ import os
 import datetime
 from urllib import urlencode
 from itertools import chain,product
+import glob
 import utils
 
 logger = logging.getLogger(__name__)
@@ -116,3 +117,11 @@ def download_date(date,dest,**kwargs):
 
     logger.debug('Attempting to download. URL:\n{}\nTarget file: {}'.format(url,target_file))
     utils.dlfile(url,target_file)
+
+
+def clean(source,dest,**kwargs):
+    import h5py
+    import pyhdf
+    for path in sorted(glob.glob(os.path.join(source,'*'))):
+        fname = os.path.basename(path)
+    

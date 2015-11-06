@@ -12,6 +12,7 @@ def cli(debug):
                         format="%(asctime)s [%(levelname)-8s] %(message)s",
                         datefmt="%H:%M:%S")
 
+
 @cli.command()
 @click.argument('years',nargs=-1,type=int)
 @click.option('--dest','-d', type=click.Path(exists=True),required=True)
@@ -34,3 +35,13 @@ def download(source,years,**kwargs):
         merra.download(year_list,**kwargs)
     else:
         logger.error('Unknown source!')
+
+
+@cli.command()
+@click.option('--source','-s',type=click.Path(exists=True),required=True)
+@click.option('--dest','-d',type=click.Path(exists=True),required=True)
+@click.option('--dataformat','-f',type=click.Choice(['merra']),required=True,default='merra')
+def clean(dataformat,**kwargs):
+    if dataformat=='merra':
+        import merra
+        logger.info('Cleaning data from MERRA')
