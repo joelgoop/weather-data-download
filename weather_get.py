@@ -14,12 +14,12 @@ def cli(debug):
 
 
 @cli.command()
+@click.argument('datasource',type=click.Choice(['merra']),default='merra')
+@click.argument('datatype',type=click.Choice(['wind', 'solar']))
 @click.argument('years',nargs=-1,type=int)
 @click.option('--dest','-d', type=click.Path(exists=True),required=True)
-@click.option('--source','-s',type=click.Choice(['merra']),required=True,default='merra')
-@click.option('--datatype','-t',type=click.Choice(['wind', 'solar']),required=True)
 @click.option('--filefmt','-f',type=click.Choice(['nc', 'hdf']),default='hdf')
-def download(source,years,**kwargs):
+def download(years,datasource,**kwargs):
     year_list = years
     try:
         # If years is of length 2 interpret as start/end year
@@ -29,7 +29,7 @@ def download(source,years,**kwargs):
     except ValueError:
         pass
 
-    if source=='merra':
+    if datasource=='merra':
         import merra
         logger.info('Downloading {} data in {} format from MERRA for years {}.'.format(kwargs['datatype'],kwargs['filefmt'],', '.join(map(str,year_list))))
         merra.download(year_list,**kwargs)
@@ -38,10 +38,14 @@ def download(source,years,**kwargs):
 
 
 @cli.command()
+@click.argument('datasource',type=click.Choice(['merra']),default='merra')
 @click.option('--source','-s',type=click.Path(exists=True),required=True)
 @click.option('--dest','-d',type=click.Path(exists=True),required=True)
-@click.option('--dataformat','-f',type=click.Choice(['merra']),required=True,default='merra')
-def clean(dataformat,**kwargs):
-    if dataformat=='merra':
+@click.option('--year','-y',type=int,required=False)
+@click.option('--datatype','-t',type=click.Choice(['wind', 'solar']),required=False)
+def clean(datasource,**kwargs):
+    if datasource=='merra':
         import merra
         logger.info('Cleaning data from MERRA')
+
+        merra.clean(**kwargs)

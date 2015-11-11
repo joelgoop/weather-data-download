@@ -20,6 +20,34 @@ def daterange(start_date, end_date):
     for n in range(int ((end_date - start_date).days)):
         yield start_date + datetime.timedelta(days=n)
 
+def hourrange(start_time, end_time):
+    """
+    Generator to iterate over range of hours.
+
+    Args:
+        start_time (datetime.datetime): datetime object for starting point
+        end_time (datetime.datetime): datetime object for end point (not included)
+
+    Yields:
+        datetime.datetime: the next hour between start and end times
+    """
+    cur_time = start_time
+    while cur_time<end_time:
+        yield cur_time
+        cur_time += datetime.timedelta(hours=1)
+
+
+def to_timestamp(dt):
+    """
+    Convert python datetime to timestamp.
+
+    Args:
+        dt (datetime.datetime): datetime object to convert
+    Returns:
+        int: timestamp
+    """
+    return int((dt-datetime.datetime(1970,1,1,0,0)).total_seconds())
+
 
 def dlfile(url,fname):
     """

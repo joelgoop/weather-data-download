@@ -5,8 +5,21 @@ from urllib import urlencode
 from itertools import chain,product
 import glob
 import utils
+import itertools as it
 
 logger = logging.getLogger(__name__)
+
+WIND_PRESET = {
+    'variables': [d+h+'m' for d,h in product(['v','u'],['2','10','50'])]+['disph'],
+    'dataset': 'tavg1_2d_slv_Nx',
+    'shortname': 'MAT1NXSLV'
+}
+
+SOLAR_PRESET = {
+    'variables': ['ts','albedo','albvisdf','albvisdr','swtdn','swgdn'],
+    'dataset': 'tavg1_2d_rad_Nx',
+    'shortname': 'MAT1NXRAD'
+}
 
 def create_url(date,dataset,shortname,variables,dataformat=('SERGLw','hdf'),bbox=(30,-15,75,42.5),dataset_version='5.2.0'):
     """
@@ -83,17 +96,9 @@ def download(years,dest,datatype,filefmt,**kwargs):
         raise(ArgumentError('Unexpected file format: {}'.format(filefmt)))
 
     if datatype=='wind':
-        options.update({
-            'variables': [d+h+'m' for d,h in product(['v','u'],['2','10','50'])],
-            'dataset': 'tavg1_2d_slv_Nx',
-            'shortname': 'MAT1NXSLV'
-        })
+        options.update(WIND_PRESET)
     elif datatype=='solar':
-        options.update({
-            'variables': ['ts','albedo','albvisdf','albvisdr','swtdn','swgdn'],
-            'dataset': 'tavg1_2d_rad_Nx',
-            'shortname': 'MAT1NXRAD'
-        })
+        options.update(SOLAR_PRESET)
     else:
         raise(ArgumentError('Unexpected data type: {}'.format(datatype)))
 
@@ -119,9 +124,103 @@ def download_date(date,dest,**kwargs):
     utils.dlfile(url,target_file)
 
 
-def clean(source,dest,**kwargs):
+def clean(source,dest,ext='hdf',datatype=None,**kwargs):
+    """
+    Concatenate data from separate files into one file for each year.
+
+    Args:
+        source (str): path to data files
+        dest (str): path to save output
+        ext (str): extension for data files
+        datatype: either 'wind','solar', or None
+    """
     import h5py
-    import pyhdf
-    for path in sorted(glob.glob(os.path.join(source,'*'))):
-        fname = os.path.basename(path)
-    
+    import pyhdf.SD as h4
+    from pyhdf.error import HDF4Error
+    import re
+
+    files = sorted(glob.glob(os.path.join(source,'*.'+ext)))
+
+    # Set dataset name to match based on datatype if set
+    if datatype == 'wind':
+        ds_match = re.escape(WIND_PRESET['dataset'])
+    elif datatype == 'solar':
+        ds_match = re.escape(SOLAR_PRESET['dataset'])
+    else:
+        ds_match = '[^\.]+'
+
+    # Regex to match year in names like MERRA300.prod.assim.tavg1_2d_slv_Nx.20010101.SUB.hdf
+    regex_y = re.compile(r'MERRA[0-9]{3}\.prod\.assim.(?P<dataset>'+ds_match+r')\.(?P<year>\d{4})\d{4}\..*\.'+ext)
+    # Group files by year to concatenate data for each year into one output file
+    files_years = group_by_tuple(files,regex_y,keys=['dataset','year'])
+
+    # Regex to match date in names like MERRA300.prod.assim.tavg1_2d_slv_Nx.20010101.SUB.hdf
+    regex_d = re.compile(r'MERRA[0-9]{3}\.prod\.assim.'+ds_match+r'\.(?P<date>\d{8})\..*\.'+ext)
+
+    for (dataset,year),files in files_years:
+        start_time = datetime.datetime(int(year),1,1,0,0)
+        end_time = datetime.datetime(int(year)+1,1,1,0,0)
+        hours = list(utils.hourrange(start_time,end_time))
+        numhours = len(hours)
+        logger.debug('Listed {} hours during year {}.'.format(numhours,year))
+        logger.info('Parsing {} data for year {}.'.format(dataset,year))
+        with h5py.File(os.path.join(dest,'{}.{}.{}'.format(dataset,year,ext))) as outfile:
+            for path in files:
+                # Extract name of file only and search for date
+                fname = os.path.basename(path)
+                m = regex_d.search(fname)
+
+                if m is not None:
+                    # Calculate index of starting hour from beginning of year
+                    cur_time = datetime.datetime.strptime(m.group('date'), '%Y%m%d')
+                    start_hour = int((cur_time - start_time).total_seconds()/3600)
+                    logger.debug('Reading file for {}: {}'.format(cur_time,fname))
+                    try:
+                        h4_file = h4.SD(path)
+                        ts = h4_file.select('time').get()
+                        lats = h4_file.select('latitude').get()
+                        longs = h4_file.select('longitude').get()
+                        numlats,numlongs = len(lats),len(longs)
+
+                        # Create latitude and longitude from input file if not found in output
+                        if any(k not in outfile for k in ['latitude','longitude','time']):
+                            logger.debug('Creating lat/long and time sets with lengths {}, {} and {}.'.format(numlats,numlongs,numhours))
+                            outfile['latitude'] = lats
+                            outfile['longitude'] = longs
+                            outfile.create_dataset('time',data=map(utils.to_timestamp,hours),dtype='int64')
+
+                        for v in (ds for  ds in h4_file.datasets() if ds not in  ['latitude','longitude','time']):
+                            if v not in outfile:
+                                logger.debug('Creating dataset {} with size ({},{},{}).'.format(v,numhours,numlats,numlongs))
+                                outfile.create_dataset(v,(numhours,numlats,numlongs))
+                            
+                            data = h4_file.select(v).get()
+                            logger.debug('Assign \'{}\', time steps {}:{}, data with shape {}'.format(v,start_hour,start_hour+len(ts),str(data.shape)))
+                            outfile[v][start_hour:start_hour+len(ts),:,:] = data
+
+
+                    except HDF4Error as e:
+                        logger.exception(e)
+                else:
+                    logger.warning('Filename could not be parsed: '+fname)
+
+def group_by_tuple(iterator,regex,keys):
+    """
+    Group an iterator of strings by keys for groups in a regex.
+
+    Args:
+        iter: iterator with strings to group
+        regex: compiled regular expression object
+        keys: keys for matching groups
+
+    Returns:
+        grouped iterator
+    """
+    def keyfunc(s):
+        m = regex.search(s)
+        if m is not None:
+            return tuple(m.group(k) for k in keys)
+        else:
+            logger.warning("Keys '{}' not found in {}.".format(','.join(keys),s))
+            return None
+    return it.groupby(iterator,keyfunc)
