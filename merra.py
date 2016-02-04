@@ -166,6 +166,7 @@ def clean(source,dest,ext='hdf',datatype=None,**kwargs):
         logger.info('Parsing {} data for year {}.'.format(dataset,year))
         with h5py.File(os.path.join(dest,'{}.{}.{}'.format(dataset,year,ext))) as outfile:
             for path in files:
+                logger.debug('Path is {} (type: {}).'.format(path,type(path)))
                 # Extract name of file only and search for date
                 fname = os.path.basename(path)
                 m = regex_d.search(fname)
@@ -176,7 +177,7 @@ def clean(source,dest,ext='hdf',datatype=None,**kwargs):
                     start_hour = int((cur_time - start_time).total_seconds()/3600)
                     logger.debug('Reading file for {}: {}'.format(cur_time,fname))
                     try:
-                        h4_file = h4.SD(path)
+                        h4_file = h4.SD(path.encode('ascii'))
                         ts = h4_file.select('time').get()
                         lats = h4_file.select('latitude').get()
                         longs = h4_file.select('longitude').get()
