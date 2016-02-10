@@ -14,11 +14,14 @@ def cli(debug):
 
 
 @cli.command()
-@click.argument('datasource',type=click.Choice(['merra']),default='merra')
 @click.argument('datatype',type=click.Choice(['wind', 'solar']))
 @click.argument('years',nargs=-1,type=int)
-@click.option('--dest','-d', type=click.Path(exists=True),required=True)
-@click.option('--filefmt','-f',type=click.Choice(['nc', 'hdf']),default='hdf')
+@click.option('--dest','-d', type=click.Path(exists=True,file_okay=False),required=True,
+    help='destination folder')
+@click.option('--filefmt','-f',type=click.Choice(['nc', 'hdf']),default='hdf',
+    help='file format (default \'hdf\')')
+@click.option('--datasource','-ds',type=click.Choice(['merra']),default='merra',
+    help='source for data (default \'merra\')')
 def download(years,datasource,**kwargs):
     year_list = years
     try:
