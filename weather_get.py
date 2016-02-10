@@ -15,7 +15,7 @@ def cli(debug):
 
 @cli.command()
 @click.argument('datatype',type=click.Choice(['wind', 'solar']))
-@click.argument('years',nargs=-1,type=int)
+@click.argument('years',nargs=-1,type=int,required=True)
 @click.option('--dest','-d', type=click.Path(exists=True,file_okay=False),required=True,
     help='destination folder')
 @click.option('--filefmt','-f',type=click.Choice(['nc', 'hdf']),default='hdf',

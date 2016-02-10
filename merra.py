@@ -21,6 +21,8 @@ SOLAR_PRESET = {
     'shortname': 'MAT1NXRAD'
 }
 
+BASE_URL = r'http://goldsmr2.sci.gsfc.nasa.gov'
+
 def create_url(date,dataset,shortname,variables,dataformat=('SERGLw','hdf'),bbox=(30,-15,75,42.5),dataset_version='5.2.0'):
     """
     Create URL string to download MERRA data from a given dataset for specific date.
@@ -75,7 +77,9 @@ def create_url(date,dataset,shortname,variables,dataformat=('SERGLw','hdf'),bbox
         'SERVICE': 'SUBSET_LATS4D',
     }
 
-    return (r"http://goldsmr2.sci.gsfc.nasa.gov/daac-bin/OTF/HTTP_services.cgi?{}".format(urlencode(merra_args)),merra_args['LABEL'])
+    return (BASE_URL+
+        r"/daac-bin/OTF/HTTP_services.cgi?{}".format(urlencode(merra_args)),
+        merra_args['LABEL'])
 
 
 def download(years,dest,datatype,filefmt,**kwargs):
@@ -102,10 +106,18 @@ def download(years,dest,datatype,filefmt,**kwargs):
     else:
         raise(ArgumentError('Unexpected data type: {}'.format(datatype)))
 
-    dates = chain(*[utils.daterange(start_date=datetime.date(year,1,1),end_date=datetime.date(year+1,1,1)) for year in years])
-    for date in dates:
+    dates = chain(*[utils.daterange(start_date=datetime.date(year,1,1),
+                                    end_date=datetime.date(year+1,1,1)) for year in years])
+    pool = utils.ThreadPool(4)
+
+    def dl_task(date):
         download_date(date,dest,**options)
         logger.info('Downloaded for {}.'.format(date))
+
+    for date in dates:
+        pool.add_task(dl_task,date)
+
+    pool.wait_completion()
 
 
 def download_date(date,dest,**kwargs):
