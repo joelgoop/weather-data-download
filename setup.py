@@ -3,12 +3,12 @@ from setuptools import setup
 setup(
     name='weather-get',
     version='0.1',
-    py_modules=['weather_get'],
+    py_modules=['main'],
     install_requires=[
         'Click',
     ],
     entry_points='''
         [console_scripts]
-        wdata=weather_get:cli
+        wdata=main:cli
     ''',
 )
