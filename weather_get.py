@@ -1,19 +1,21 @@
 import click
 import logging, logging.config
+import os
 
-logger = logging.getLogger(__name__)
-
+logger = logging.getLogger('weather-data-download')
+LOG_FORMAT = "%(asctime)s [%(levelname)-8s] %(message)s"
+LOG_DATEFMT = "%H:%M:%S"
 
 @click.group()
 @click.option('--debug','-d',is_flag=True,help='Show debug messages.')
 def cli(debug):
     level = logging.DEBUG if debug else logging.INFO
     logging.basicConfig(level=level,
-                        format="%(asctime)s [%(levelname)-8s] %(message)s",
-                        datefmt="%H:%M:%S")
+                        format=LOG_FORMAT,
+                        datefmt=LOG_DATEFMT)
 
 
-@cli.command()
+@cli.command(help="choose datatype 'wind' or 'solar' and set years to download")
 @click.argument('datatype',type=click.Choice(['wind', 'solar']))
 @click.argument('years',nargs=-1,type=int,required=True)
 @click.option('--dest','-d', type=click.Path(exists=True,file_okay=False),required=True,
@@ -22,7 +24,11 @@ def cli(debug):
     help='file format (default \'hdf\')')
 @click.option('--datasource','-ds',type=click.Choice(['merra']),default='merra',
     help='source for data (default \'merra\')')
-def download(years,datasource,**kwargs):
+@click.option('--logfile','-l',is_flag=True,default=True,
+    help='write log to file in target directory (default True)')
+@click.option('--skip-existing','-se',is_flag=True,default=True,
+    help='skip downloading if target already exists (default True)')
+def download(years,datasource,logfile,dest,**kwargs):
     year_list = years
     try:
         # If years is of length 2 interpret as start/end year
@@ -32,10 +38,15 @@ def download(years,datasource,**kwargs):
     except ValueError:
         pass
 
+    if logfile:
+        fh = logging.FileHandler(os.path.join(dest,'download.log'))
+        fh.setFormatter(logging.Formatter(LOG_FORMAT,datefmt='%Y-%m-%d '+LOG_DATEFMT))
+        logger.addHandler(fh)
+
     if datasource=='merra':
         import merra
         logger.info('Downloading {} data in {} format from MERRA for years {}.'.format(kwargs['datatype'],kwargs['filefmt'],', '.join(map(str,year_list))))
-        merra.download(year_list,**kwargs)
+        merra.download(year_list,dest,**kwargs)
     else:
         logger.error('Unknown source!')
 

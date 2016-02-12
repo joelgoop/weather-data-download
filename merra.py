@@ -7,7 +7,7 @@ import glob
 import utils
 import itertools as it
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('weather-data-download')
 
 WIND_PRESET = {
     'variables': [d+h+'m' for d,h in product(['v','u'],['2','10','50'])]+['disph'],
@@ -23,7 +23,7 @@ SOLAR_PRESET = {
 
 BASE_URL = r'http://goldsmr2.sci.gsfc.nasa.gov'
 
-def create_url(date,dataset,shortname,variables,dataformat=('SERGLw','hdf'),bbox=(30,-15,75,42.5),dataset_version='5.2.0'):
+def create_url(date,dataset,shortname,variables,revision,dataformat=('SERGLw','hdf'),bbox=(30,-15,75,42.5),dataset_version='5.2.0'):
     """
     Create URL string to download MERRA data from a given dataset for specific date.
 
@@ -32,6 +32,9 @@ def create_url(date,dataset,shortname,variables,dataformat=('SERGLw','hdf'),bbox
         dataset (str): name of MERRA dataset (e.g. tavg1_2d_slv_Nx)
         shortname (str): short name of MERRA dataset (e.g. MAT1NXSLV)
         variables (list): names for variables in MERRA
+        revision (int): version above main version number, i.e., 
+            0 gives 100, 200 or 300, while 1 gives 101, 201 or 301
+        dataformat (tuple): MERRA format code and file extension
         bbox (4-tuple of floats): bounding box in lat/long as tuple (lower lat, lower 
             long, upper lat, upper long) default is main Europe
 
@@ -43,7 +46,7 @@ def create_url(date,dataset,shortname,variables,dataformat=('SERGLw','hdf'),bbox
     logger.debug("Create URL to get {} from {} ({}) for {} within ({}).".format(','.join(variables),dataset,shortname,date,bbox_str))
 
     # MERRA200 from Jan 1 1992
-    merra200_breakpoint = datetime.date(1992,1,1)
+    merra200_breakpoint = datetime.date(1993,1,1)
     # MERRA300 from Jan 1 2001
     merra300_breakpoint = datetime.date(2001,1,1)
     # tavg1_2d_rad_Nx update date: Jan 1 2010
@@ -56,13 +59,9 @@ def create_url(date,dataset,shortname,variables,dataformat=('SERGLw','hdf'),bbox
         merra_version = 200
     else:
         merra_version = 300
-    logger.debug('For {}, the MERRA version is {}'.format(date,merra_version))
 
-    # When data is updated by NASA, the new versions are called 101, 201, 301
-    # For the 'tavg1_2d_rad_Nx' dataset all files before Jan 1st 2010 have been updated
-    if dataset == 'tavg1_2d_rad_Nx' and date < rad_update_date:
-        merra_version += 1
-        logger.debug('{} before {} has been updated, changing version to {}.'.format(dataset,rad_update_date,merra_version))
+    merra_version += revision
+    logger.debug('For {}, the MERRA version is {} (revision {}).'.format(date,merra_version,revision))
 
     merra_args = {
         'BBOX': bbox_str,
@@ -82,13 +81,16 @@ def create_url(date,dataset,shortname,variables,dataformat=('SERGLw','hdf'),bbox
         merra_args['LABEL'])
 
 
-def download(years,dest,datatype,filefmt,**kwargs):
+def download(years,dest,skip_existing,datatype,filefmt,**kwargs):
     """
     Create date range and downloads file for each date.
 
     Args:
         years (iterable): years for which to download data
         dest (str): path to destination directory
+        skip_existing (bool): skip download if target exists
+        datatype (str): choose 'wind' or 'solar' data for presets
+        filefmt (str): file format to download
     """
     options = {}
 
@@ -111,29 +113,42 @@ def download(years,dest,datatype,filefmt,**kwargs):
     pool = utils.ThreadPool(4)
 
     def dl_task(date):
-        download_date(date,dest,**options)
-        logger.info('Downloaded for {}.'.format(date))
+        download_date(date,dest,skip_existing,**options)
 
+    count = 0
     for date in dates:
         pool.add_task(dl_task,date)
+        # count += 1
+        # if count > 10:
+        #     break
 
     pool.wait_completion()
 
 
-def download_date(date,dest,**kwargs):
+def download_date(date,dest,skip=False,**kwargs):
     """
     Download MERRA data for specific date into target directory.
 
     Args:
         date (datetime.date): date for which to download data
         dest (str): path to destination directory
+        skip (bool): whether to skip if file exists
         kwargs: keyword arguments to be sent to create_url
     """
-    url,label = create_url(date,**kwargs)
-    target_file = os.path.join(dest,label)
+    def try_download_revision(revision):
+        url,label = create_url(date=date,revision=revision,**kwargs)
+        target_file = os.path.join(dest,label)
+        logger.debug('Attempting to download. URL:\n{}\nTarget file: {}'.format(url,target_file))
+        if not (os.path.isfile(target_file) and skip):
+            utils.dlfile(url,target_file)
+            logger.info('Downloaded for {}.'.format(date))
+        else:
+            logger.info('Target for {} exists. Skipping.'.format(date))
 
-    logger.debug('Attempting to download. URL:\n{}\nTarget file: {}'.format(url,target_file))
-    utils.dlfile(url,target_file)
+    utils.retry_with_args(
+        try_download_revision,[0,1,2],
+        exc=utils.URLNotFoundException,
+        delay=1)
 
 
 def clean(source,dest,ext='hdf',datatype=None,**kwargs):
@@ -164,7 +179,7 @@ def clean(source,dest,ext='hdf',datatype=None,**kwargs):
     # Regex to match year in names like MERRA300.prod.assim.tavg1_2d_slv_Nx.20010101.SUB.hdf
     regex_y = re.compile(r'MERRA[0-9]{3}\.prod\.assim.(?P<dataset>'+ds_match+r')\.(?P<year>\d{4})\d{4}\..*\.'+ext)
     # Group files by year to concatenate data for each year into one output file
-    files_years = group_by_tuple(files,regex_y,keys=['dataset','year'])
+    files_years = utils.group_by_tuple(files,regex_y,keys=['dataset','year'])
 
     # Regex to match date in names like MERRA300.prod.assim.tavg1_2d_slv_Nx.20010101.SUB.hdf
     regex_d = re.compile(r'MERRA[0-9]{3}\.prod\.assim.'+ds_match+r'\.(?P<date>\d{8})\..*\.'+ext)
@@ -216,24 +231,3 @@ def clean(source,dest,ext='hdf',datatype=None,**kwargs):
                         logger.exception(e)
                 else:
                     logger.warning('Filename could not be parsed: '+fname)
-
-def group_by_tuple(iterator,regex,keys):
-    """
-    Group an iterator of strings by keys for groups in a regex.
-
-    Args:
-        iter: iterator with strings to group
-        regex: compiled regular expression object
-        keys: keys for matching groups
-
-    Returns:
-        grouped iterator
-    """
-    def keyfunc(s):
-        m = regex.search(s)
-        if m is not None:
-            return tuple(m.group(k) for k in keys)
-        else:
-            logger.warning("Keys '{}' not found in {}.".format(','.join(keys),s))
-            return None
-    return it.groupby(iterator,keyfunc)
