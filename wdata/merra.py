@@ -64,6 +64,8 @@ PRESETS = {
         'version_breakpoints': [],
         'service': 'SUBSET_MERRA2',
         'version': '1.02',
+        'label': 'svc_MERRA2_{merra_version}.{dataset}.{date.year}{date.month:02d}{date.day:02d}.{ext}',
+        'filename': r'/data/s4pa/MERRA2/{shortname}.{data_version}/{date.year}/{date.month:02d}/MERRA2_{merra_version}.{dataset}.{date.year}{date.month:02d}{date.day:02d}.{ext}',
         'base_url': r'http://goldsmr4.gesdisc.eosdis.nasa.gov/daac-bin/OTF/HTTP_services.cgi?'
     }
 }
@@ -109,7 +111,7 @@ def create_url(date,datatype,settings,filefmt,revision,bbox='europe'):
         if date > b:
             merra_version += 100
     merra_version += revision
-    # data_info['merra_version'] = merra_version
+    data_info['merra_version'] = merra_version
 
     logger.debug('For {}, the MERRA version is {} (revision {}).'.format(date,merra_version,revision))
 
@@ -123,8 +125,6 @@ def create_url(date,datatype,settings,filefmt,revision,bbox='europe'):
         'SHORTNAME': data_info['shortname'],
         'SERVICE': settings['service'],
     }
-
-    logger.debug('Test')
 
     return (settings['base_url']+urlencode(merra_args), merra_args['LABEL'])
 
