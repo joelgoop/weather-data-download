@@ -9,146 +9,189 @@ import itertools as it
 
 logger = logging.getLogger('weather-data-download')
 
-WIND_PRESET = {
-    'variables': [d+h+'m' for d,h in product(['v','u'],['2','10','50'])]+['disph'],
-    'dataset': 'tavg1_2d_slv_Nx',
-    'shortname': 'MAT1NXSLV'
+PRESETS = {
+    # MERRA settings
+    'merra': {
+        'datatypes': {
+            'wind': {
+                'variables': [d+h+'m' for d,h in product(['v','u'],['2','10','50'])]+['disph'],
+                'dataset': 'tavg1_2d_slv_Nx',
+                'shortname': 'MAT1NXSLV',
+                'data_version': '5.2.0'
+            },
+            'solar': {
+                'variables': ['ts','albedo','albvisdf','albvisdr','swtdn','swgdn'],
+                'dataset': 'tavg1_2d_rad_Nx',
+                'shortname': 'MAT1NXRAD',
+                'data_version': '5.2.0'
+            }
+        },
+        'fileformats': {
+            'hdf': ('SERGLw','hdf'),
+            'nc': ('TmV0Q0RGLw','nc')
+        },
+        # Increase version by 100 at each breakpoint
+        'version_breakpoints': [
+            datetime.date(1993,1,1), # MERRA200 after 1/1 1993
+            datetime.date(2001,1,1) # MERRA300 after 1/1 2001
+        ],
+        'service': 'SUBSET_LATS4D',
+        'version': '1.02',
+        'filename': r'/data/s4pa/MERRA/{shortname}.{data_version}/{date.year}/{date.month:02d}/MERRA{merra_version}.prod.assim.{dataset}.{date.year}{date.month:02d}{date.day:02d}.{ext}',
+        'label': 'MERRA{merra_version}.prod.assim.{dataset}.{date.year}{date.month:02d}{date.day:02d}.SUB.{ext}',
+        'base_url': r'http://goldsmr2.sci.gsfc.nasa.gov/daac-bin/OTF/HTTP_services.cgi?'
+    },
+
+    # MERRA-2 settings
+    'merra2': {
+        'datatypes': {
+            'wind': {
+                'variables': [d+h+'m' for d,h in product(['v','u'],['2','10','50'])]+['disph'],
+                'dataset': 'tavg1_2d_slv_Nx',
+                'shortname': 'M2T1NXSLV',
+                'data_version': '5.12.4',
+            },
+            'solar': {
+                'variables': ['ts','albedo','albvisdf','albvisdr','swtdn','swgdn'],
+                'dataset': 'tavg1_2d_rad_Nx',
+                'shortname': 'M2T1NXRAD',
+                'data_version': '5.12.4',
+            }
+        },
+        'fileformats': {
+            'nc4': ('bmM0Lw','nc4')
+        },
+        'version_breakpoints': [],
+        'service': 'SUBSET_MERRA2',
+        'version': '1.02',
+        'base_url': r'http://goldsmr4.gesdisc.eosdis.nasa.gov/daac-bin/OTF/HTTP_services.cgi?'
+    }
 }
 
-SOLAR_PRESET = {
-    'variables': ['ts','albedo','albvisdf','albvisdr','swtdn','swgdn'],
-    'dataset': 'tavg1_2d_rad_Nx',
-    'shortname': 'MAT1NXRAD'
+BBOX_PRESETS = {
+    'europe': (30,-15,75,42.5)
 }
 
-BASE_URL = r'http://goldsmr2.sci.gsfc.nasa.gov'
-
-def create_url(date,dataset,shortname,variables,revision,dataformat=('SERGLw','hdf'),bbox=(30,-15,75,42.5),dataset_version='5.2.0'):
+def create_url(date,datatype,settings,filefmt,revision,bbox='europe'):
     """
     Create URL string to download MERRA data from a given dataset for specific date.
 
     Args:
         date (datetime.date): date for which to get data
-        dataset (str): name of MERRA dataset (e.g. tavg1_2d_slv_Nx)
-        shortname (str): short name of MERRA dataset (e.g. MAT1NXSLV)
-        variables (list): names for variables in MERRA
+        datatype (str): which set of variables and settings to use 'wind' or 'solar'
+        filefmt (str): format key
         revision (int): version above main version number, i.e., 
             0 gives 100, 200 or 300, while 1 gives 101, 201 or 301
-        dataformat (tuple): MERRA format code and file extension
-        bbox (4-tuple of floats): bounding box in lat/long as tuple (lower lat, lower 
-            long, upper lat, upper long) default is main Europe
+        bbox: key to presets or 4-tuple with coordinates
 
     Returns:
         A tuple with URL string and label.
     """
-    fmt_code,ext = dataformat
-    bbox_str = '{},{},{},{}'.format(*bbox)
-    logger.debug("Create URL to get {} from {} ({}) for {} within ({}).".format(','.join(variables),dataset,shortname,date,bbox_str))
-
-    # MERRA200 from Jan 1 1992
-    merra200_breakpoint = datetime.date(1993,1,1)
-    # MERRA300 from Jan 1 2001
-    merra300_breakpoint = datetime.date(2001,1,1)
-    # tavg1_2d_rad_Nx update date: Jan 1 2010
-    rad_update_date = datetime.date(2010,1,1)
-
-    # Set MERRA version based on date
-    if date < merra200_breakpoint:
-        merra_version = 100
-    elif date < merra300_breakpoint:
-        merra_version = 200
+    if bbox in BBOX_PRESETS:
+        bbox_tup = BBOX_PRESETS[bbox]
     else:
-        merra_version = 300
+        bbox_tup = bbox
+    bbox_str = '{},{},{},{}'.format(*bbox_tup)
 
+    fmt_code,ext = settings['fileformats'][filefmt]
+
+    data_info = {
+        'ext': ext,
+        'date': date
+    }
+    data_info.update(settings['datatypes'][datatype])
+
+    logger.debug("Create URL to get {} from {dataset} ({shortname}) for {date} within ({bbox_str}).".format(
+        ','.join(data_info['variables']),bbox_str=bbox_str,**data_info))
+
+    merra_version = 100
+    for b in settings['version_breakpoints']:
+        if date > b:
+            merra_version += 100
     merra_version += revision
+    # data_info['merra_version'] = merra_version
+
     logger.debug('For {}, the MERRA version is {} (revision {}).'.format(date,merra_version,revision))
 
     merra_args = {
         'BBOX': bbox_str,
-        'FILENAME': r'/data/s4pa/MERRA/{shortname}.{dataset_version}/{date.year}/{date.month:02d}/MERRA{merra_version}.prod.assim.{dataset}.{date.year}{date.month:02d}{date.day:02d}.hdf' \
-                        .format(date=date,merra_version=merra_version,shortname=shortname,dataset=dataset,dataset_version=dataset_version),
+        'FILENAME': settings['filename'].format(**data_info),
         'FORMAT': fmt_code,
-        'LABEL': 'MERRA{merra_version}.prod.assim.{dataset}.{date.year}{date.month:02d}{date.day:02d}.SUB.{ext}' \
-                        .format(date=date,merra_version=merra_version,dataset=dataset,ext=ext),
-        'VARIABLES': ','.join(variables),
-        'VERSION': '1.02',
-        'SHORTNAME': shortname,
-        'SERVICE': 'SUBSET_LATS4D',
+        'LABEL':  settings['label'].format(**data_info),
+        'VARIABLES': ','.join(data_info['variables']),
+        'VERSION': settings['version'],
+        'SHORTNAME': data_info['shortname'],
+        'SERVICE': settings['service'],
     }
 
-    return (BASE_URL+
-        r"/daac-bin/OTF/HTTP_services.cgi?{}".format(urlencode(merra_args)),
-        merra_args['LABEL'])
+    logger.debug('Test')
+
+    return (settings['base_url']+urlencode(merra_args), merra_args['LABEL'])
 
 
-def download(years,dest,skip_existing,datatype,filefmt,**kwargs):
+def download(years,datasource,dest,skip_existing,datatype,filefmt,**kwargs):
     """
     Create date range and downloads file for each date.
 
     Args:
         years (iterable): years for which to download data
+        datasource (str): source ('merra' or 'merra2')
         dest (str): path to destination directory
         skip_existing (bool): skip download if target exists
         datatype (str): choose 'wind' or 'solar' data for presets
         filefmt (str): file format to download
     """
-    options = {}
+    try:
+        options = PRESETS[datasource]
+    except KeyError as e:
+        raise ArgumentError("Unknown datasource '{}'".format(datasource))
 
-    if filefmt=='nc':
-        options.update({'dataformat': ('TmV0Q0RGLw','nc')})
-    elif filefmt=='hdf':
-        options.update({'dataformat': ('SERGLw','hdf')})
-    else:
-        raise(ArgumentError('Unexpected file format: {}'.format(filefmt)))
-
-    if datatype=='wind':
-        options.update(WIND_PRESET)
-    elif datatype=='solar':
-        options.update(SOLAR_PRESET)
-    else:
-        raise(ArgumentError('Unexpected data type: {}'.format(datatype)))
+    if datatype not in options['datatypes']:
+        raise ArgumentError("Unknown datatype '{}' for source '{}'".format(datatype,datasource))
+    if filefmt not in options['fileformats']:
+        raise ArgumentError("Unknown file format '{}' for source '{}'".format(filefmt,datasource))
+    
 
     dates = chain(*[utils.daterange(start_date=datetime.date(year,1,1),
                                     end_date=datetime.date(year+1,1,1)) for year in years])
-    pool = utils.ThreadPool(4)
+    pool = utils.ThreadPool(1)
 
     def dl_task(date):
-        download_date(date,dest,skip_existing,**options)
+        download_date(date,dest,skip_existing,settings=options,
+            datatype=datatype,filefmt=filefmt)
 
-    count = 0
     for date in dates:
         pool.add_task(dl_task,date)
-        # count += 1
-        # if count > 10:
-        #     break
+        break
 
     pool.wait_completion()
 
 
-def download_date(date,dest,skip=False,**kwargs):
+def download_date(date,dest,skip_existing=False,**kwargs):
     """
     Download MERRA data for specific date into target directory.
 
     Args:
         date (datetime.date): date for which to download data
         dest (str): path to destination directory
-        skip (bool): whether to skip if file exists
+        skip_existing (bool): whether to skip if file exists
         kwargs: keyword arguments to be sent to create_url
     """
     def try_download_revision(revision):
         url,label = create_url(date=date,revision=revision,**kwargs)
         target_file = os.path.join(dest,label)
         logger.debug('Attempting to download. URL:\n{}\nTarget file: {}'.format(url,target_file))
-        if not (os.path.isfile(target_file) and skip):
+        if not (os.path.isfile(target_file) and skip_existing):
             utils.dlfile(url,target_file)
             logger.info('Downloaded for {}.'.format(date))
         else:
             logger.info('Target for {} exists. Skipping.'.format(date))
 
-    utils.retry_with_args(
-        try_download_revision,[0,1,2],
-        exc=utils.URLNotFoundException,
-        delay=1)
+    try_download_revision(0)
+    # utils.retry_with_args(
+    #     try_download_revision,[0,1,2],
+    #     exc=utils.URLNotFoundException,
+        # delay=1)
 
 
 def clean(source,dest,ext='hdf',datatype=None,**kwargs):
@@ -169,12 +212,9 @@ def clean(source,dest,ext='hdf',datatype=None,**kwargs):
     files = sorted(glob.glob(os.path.join(source,'*.'+ext)))
 
     # Set dataset name to match based on datatype if set
-    if datatype == 'wind':
-        ds_match = re.escape(WIND_PRESET['dataset'])
-    elif datatype == 'solar':
-        ds_match = re.escape(SOLAR_PRESET['dataset'])
-    else:
-        ds_match = '[^\.]+'
+    if datatype not in PRESETS['merra']['datatypes']:
+        raise ArgumentError("Unknown datatype '{}' for datasource 'merra'".format(datatype))
+    ds_match = re.escape(PRESETS['merra']['datatypes'][datatype]['dataset'])
 
     # Regex to match year in names like MERRA300.prod.assim.tavg1_2d_slv_Nx.20010101.SUB.hdf
     regex_y = re.compile(r'MERRA[0-9]{3}\.prod\.assim.(?P<dataset>'+ds_match+r')\.(?P<year>\d{4})\d{4}\..*\.'+ext)

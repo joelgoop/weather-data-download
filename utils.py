@@ -97,8 +97,6 @@ def dlfile(url,fname):
         url (str): URL string to download
         fname (str): path to local file 
     """
-    # Open the url
-    logger.debug("Attempting to download: {}".format(url))
     try:
         with contextlib.closing(urlopen(url)) as f:
 

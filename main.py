@@ -15,7 +15,7 @@ def cli(debug):
                         datefmt=LOG_DATEFMT)
 
 
-@cli.command(help="choose datatype 'wind' or 'solar' and set years to download")
+@cli.command(help="download wind or solar data")
 @click.argument('datatype',type=click.Choice(['wind', 'solar']))
 @click.argument('years',nargs=-1,type=int,required=True)
 @click.option('--dest','-d', type=click.Path(exists=True,file_okay=False),required=True,
@@ -43,15 +43,16 @@ def download(years,datasource,logfile,dest,**kwargs):
         fh.setFormatter(logging.Formatter(LOG_FORMAT,datefmt='%Y-%m-%d '+LOG_DATEFMT))
         logger.addHandler(fh)
 
-    if datasource=='merra':
+    if 'merra' in datasource:
         import merra
         logger.info('Downloading {} data in {} format from MERRA for years {}.'.format(kwargs['datatype'],kwargs['filefmt'],', '.join(map(str,year_list))))
-        merra.download(year_list,dest,**kwargs)
+        logger.debug('Keyword arguments: {}'.format(kwargs))
+        merra.download(year_list,datasource,dest,**kwargs)
     else:
         logger.error('Unknown source!')
 
 
-@cli.command()
+@cli.command(help="aggregate and create time index")
 @click.argument('datasource',type=click.Choice(['merra']),default='merra')
 @click.option('--source','-s',type=click.Path(exists=True),required=True)
 @click.option('--dest','-d',type=click.Path(exists=True),required=True)
