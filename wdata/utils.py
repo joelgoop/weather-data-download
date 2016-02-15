@@ -122,8 +122,10 @@ class Worker(threading.Thread):
     def run(self):
         while True:
             func, args, kargs = self.tasks.get()
-            try: func(*args, **kargs)
-            except Exception, e: print e
+            try: 
+                func(*args, **kargs)
+            except Exception as e: 
+                logger.exception(e)
             self.tasks.task_done()
 
 class ThreadPool:
@@ -154,6 +156,7 @@ def group_by_tuple(iterator,regex,keys):
     Returns:
         grouped iterator
     """
+    import itertools as it
     def keyfunc(s):
         m = regex.search(s)
         if m is not None:

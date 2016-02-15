@@ -28,7 +28,8 @@ PRESETS = {
         },
         'fileformats': {
             'hdf': ('SERGLw','hdf'),
-            'nc': ('TmV0Q0RGLw','nc')
+            'nc': ('TmV0Q0RGLw','nc'),
+            'default': ('SERGLw','hdf')
         },
         # Increase version by 100 at each breakpoint
         'version_breakpoints': [
@@ -59,7 +60,8 @@ PRESETS = {
             }
         },
         'fileformats': {
-            'nc4': ('bmM0Lw','nc4')
+            'nc4': ('bmM0Lw','nc4'),
+            'default': ('bmM0Lw','nc4')
         },
         'version_breakpoints': [],
         'service': 'SUBSET_MERRA2',
@@ -81,6 +83,7 @@ def create_url(date,datatype,settings,filefmt,revision,bbox='europe'):
     Args:
         date (datetime.date): date for which to get data
         datatype (str): which set of variables and settings to use 'wind' or 'solar'
+        settings (dict): dictionary of settings
         filefmt (str): format key
         revision (int): version above main version number, i.e., 
             0 gives 100, 200 or 300, while 1 gives 101, 201 or 301
@@ -129,7 +132,7 @@ def create_url(date,datatype,settings,filefmt,revision,bbox='europe'):
     return (settings['base_url']+urlencode(merra_args), merra_args['LABEL'])
 
 
-def download(years,datasource,dest,skip_existing,datatype,filefmt,**kwargs):
+def download(years,datasource,dest,skip_existing,datatype,filefmt):
     """
     Create date range and downloads file for each date.
 
@@ -154,7 +157,7 @@ def download(years,datasource,dest,skip_existing,datatype,filefmt,**kwargs):
 
     dates = chain(*[utils.daterange(start_date=datetime.date(year,1,1),
                                     end_date=datetime.date(year+1,1,1)) for year in years])
-    pool = utils.ThreadPool(1)
+    pool = utils.ThreadPool(4)
 
     def dl_task(date):
         download_date(date,dest,skip_existing,settings=options,
@@ -162,7 +165,6 @@ def download(years,datasource,dest,skip_existing,datatype,filefmt,**kwargs):
 
     for date in dates:
         pool.add_task(dl_task,date)
-        break
 
     pool.wait_completion()
 
@@ -187,14 +189,13 @@ def download_date(date,dest,skip_existing=False,**kwargs):
         else:
             logger.info('Target for {} exists. Skipping.'.format(date))
 
-    try_download_revision(0)
-    # utils.retry_with_args(
-    #     try_download_revision,[0,1,2],
-    #     exc=utils.URLNotFoundException,
-        # delay=1)
+    utils.retry_with_args(
+        try_download_revision,[0,1,2],
+        exc=utils.URLNotFoundException,
+        delay=1)
 
 
-def clean(source,dest,ext='hdf',datatype=None,**kwargs):
+def clean_merra(source,dest,ext='hdf',out_ext='hdf',datatype=None,**kwargs):
     """
     Concatenate data from separate files into one file for each year.
 
@@ -204,6 +205,8 @@ def clean(source,dest,ext='hdf',datatype=None,**kwargs):
         ext (str): extension for data files
         datatype: either 'wind','solar', or None
     """
+    logger.debug('Applying MERRA2 data cleaning function.')
+
     import h5py
     import pyhdf.SD as h4
     from pyhdf.error import HDF4Error
@@ -231,7 +234,7 @@ def clean(source,dest,ext='hdf',datatype=None,**kwargs):
         numhours = len(hours)
         logger.debug('Listed {} hours during year {}.'.format(numhours,year))
         logger.info('Parsing {} data for year {}.'.format(dataset,year))
-        with h5py.File(os.path.join(dest,'{}.{}.{}'.format(dataset,year,ext))) as outfile:
+        with h5py.File(os.path.join(dest,'{}.{}.{}'.format(dataset,year,out_ext))) as outfile:
             for path in files:
                 logger.debug('Path is {} (type: {}).'.format(path,type(path)))
                 # Extract name of file only and search for date
@@ -258,16 +261,90 @@ def clean(source,dest,ext='hdf',datatype=None,**kwargs):
                             outfile.create_dataset('time',data=map(utils.to_timestamp,hours),dtype='int64')
 
                         for v in (ds for  ds in h4_file.datasets() if ds not in  ['latitude','longitude','time']):
-                            if v not in outfile:
-                                logger.debug('Creating dataset {} with size ({},{},{}).'.format(v,numhours,numlats,numlongs))
-                                outfile.create_dataset(v,(numhours,numlats,numlongs))
+                            if v.lower() not in outfile:
+                                logger.debug('Creating dataset {} with size ({},{},{}).'.format(v.lower(),numhours,numlats,numlongs))
+                                outfile.create_dataset(v.lower(),(numhours,numlats,numlongs))
                             
                             data = h4_file.select(v).get()
                             logger.debug('Assign \'{}\', time steps {}:{}, data with shape {}'.format(v,start_hour,start_hour+len(ts),str(data.shape)))
-                            outfile[v][start_hour:start_hour+len(ts),:,:] = data
+                            outfile[v.lower()][start_hour:start_hour+len(ts),:,:] = data
 
 
                     except HDF4Error as e:
                         logger.exception(e)
+                else:
+                    logger.warning('Filename could not be parsed: '+fname)
+
+
+def clean_merra2(source,dest,ext='nc4',out_ext='hdf',datatype=None,**kwargs):
+    """
+    Concatenate MERRA2 data from separate files into one file for each year.
+
+    Args:
+        source (str): path to data files
+        dest (str): path to save output
+        ext (str): extension for data files
+        datatype: either 'wind','solar', or None
+    """
+    logger.debug('Applying MERRA2 data cleaning function.')
+    import h5py
+    import re
+
+    files = sorted(glob.glob(os.path.join(source,'*.'+ext)))
+
+    # Set dataset name to match based on datatype if set
+    if datatype not in PRESETS['merra2']['datatypes']:
+        raise ArgumentError("Unknown datatype '{}' for datasource 'merra'".format(datatype))
+    ds_match = re.escape(PRESETS['merra2']['datatypes'][datatype]['dataset'])
+
+    # Regex to match year in names like svc_MERRA2_100.tavg1_2d_slv_Nx.19800101.nc4
+    regex_y = re.compile(r'svc_MERRA2_[0-9]{3}\.(?P<dataset>'+ds_match+r')\.(?P<year>\d{4})\d{4}\.'+ext)
+
+    # Group files by year to concatenate data for each year into one output file
+    files_years = utils.group_by_tuple(files,regex_y,keys=['dataset','year'])
+
+    # Regex to match date in names like svc_MERRA2_100.tavg1_2d_slv_Nx.19800101.nc4
+    regex_d = re.compile(r'svc_MERRA2_[0-9]{3}\.(?P<dataset>'+ds_match+r')\.(?P<date>\d{8})\.'+ext)
+
+    for (dataset,year),files in files_years:
+        start_time = datetime.datetime(int(year),1,1,0,0)
+        end_time = datetime.datetime(int(year)+1,1,1,0,0)
+        hours = list(utils.hourrange(start_time,end_time))
+        numhours = len(hours)
+        logger.debug('Listed {} hours during year {}.'.format(numhours,year))
+        logger.info('Parsing {} data for year {}.'.format(dataset,year))
+        with h5py.File(os.path.join(dest,'{}.{}.{}'.format(dataset,year,out_ext))) as outfile:
+            for path in files:
+                logger.debug('Path is {} (type: {}).'.format(path,type(path)))
+                # Extract name of file only and search for date
+                fname = os.path.basename(path)
+                m = regex_d.search(fname)
+
+                if m is not None:
+                    # Calculate index of starting hour from beginning of year
+                    cur_time = datetime.datetime.strptime(m.group('date'), '%Y%m%d')
+                    start_hour = int((cur_time - start_time).total_seconds()/3600)
+                    logger.debug('Reading file for {}: {}'.format(cur_time,fname))
+                    with h5py.File(path.encode('ascii')) as h5_file:
+                        ts = h5_file['time'][:]
+                        lats = h5_file['lat'][:]
+                        longs = h5_file['lon'][:]
+                        numlats,numlongs = len(lats),len(longs)
+
+                        # Create latitude and longitude from input file if not found in output
+                        if any(k not in outfile for k in ['latitude','longitude','time']):
+                            logger.debug('Creating lat/long and time sets with lengths {}, {} and {}.'.format(numlats,numlongs,numhours))
+                            outfile['latitude'] = lats
+                            outfile['longitude'] = longs
+                            outfile.create_dataset('time',data=map(utils.to_timestamp,hours),dtype='int64')
+
+                        for v in (ds for  ds in h5_file if ds not in  ['lat','lon','time']):
+                            if v.lower() not in outfile:
+                                logger.debug('Creating dataset {} with size ({},{},{}).'.format(v.lower(),numhours,numlats,numlongs))
+                                outfile.create_dataset(v.lower(),(numhours,numlats,numlongs))
+                            
+                            data = h5_file[v][:]
+                            logger.debug('Assign \'{}\', time steps {}:{}, data with shape {}'.format(v.lower(),start_hour,start_hour+len(ts),str(data.shape)))
+                            outfile[v.lower()][start_hour:start_hour+len(ts),:,:] = data
                 else:
                     logger.warning('Filename could not be parsed: '+fname)
