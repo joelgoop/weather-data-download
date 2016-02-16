@@ -63,7 +63,11 @@ PRESETS = {
             'nc4': ('bmM0Lw','nc4'),
             'default': ('bmM0Lw','nc4')
         },
-        'version_breakpoints': [],
+        'version_breakpoints': [
+            datetime.date(1992,1,1), # MERRA200 after 1/1 1992
+            datetime.date(2001,1,1), # MERRA300 after 1/1 2001
+            datetime.date(2011,1,1) # MERRA400 after 1/1 2011
+        ],
         'service': 'SUBSET_MERRA2',
         'version': '1.02',
         'label': 'svc_MERRA2_{merra_version}.{dataset}.{date.year}{date.month:02d}{date.day:02d}.{ext}',
@@ -111,7 +115,7 @@ def create_url(date,datatype,settings,filefmt,revision,bbox='europe'):
 
     merra_version = 100
     for b in settings['version_breakpoints']:
-        if date > b:
+        if date >= b:
             merra_version += 100
     merra_version += revision
     data_info['merra_version'] = merra_version
