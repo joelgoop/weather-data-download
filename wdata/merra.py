@@ -199,7 +199,7 @@ def download_date(date,dest,skip_existing=False,**kwargs):
         delay=1)
 
 
-def clean_merra(source,dest,ext='hdf',out_ext='hdf',datatype=None,**kwargs):
+def clean_merra(source,dest,skip_existing,ext='hdf',out_ext='hdf',datatype=None,**kwargs):
     """
     Concatenate data from separate files into one file for each year.
 
@@ -238,49 +238,53 @@ def clean_merra(source,dest,ext='hdf',out_ext='hdf',datatype=None,**kwargs):
         numhours = len(hours)
         logger.debug('Listed {} hours during year {}.'.format(numhours,year))
         logger.info('Parsing {} data for year {}.'.format(dataset,year))
-        with h5py.File(os.path.join(dest,'{}.{}.{}'.format(dataset,year,out_ext))) as outfile:
-            for path in files:
-                logger.debug('Path is {} (type: {}).'.format(path,type(path)))
-                # Extract name of file only and search for date
-                fname = os.path.basename(path)
-                m = regex_d.search(fname)
+        out_path = os.path.join(dest,'{}.{}.{}'.format(dataset,year,out_ext))
+        if os.path.isfile(out_path) and skip_existing:
+            logger.info('{} exists. Skipping.'.format(out_path))
+        else:
+            with h5py.File(out_path) as outfile:
+                for path in files:
+                    logger.debug('Path is {} (type: {}).'.format(path,type(path)))
+                    # Extract name of file only and search for date
+                    fname = os.path.basename(path)
+                    m = regex_d.search(fname)
 
-                if m is not None:
-                    # Calculate index of starting hour from beginning of year
-                    cur_time = datetime.datetime.strptime(m.group('date'), '%Y%m%d')
-                    start_hour = int((cur_time - start_time).total_seconds()/3600)
-                    logger.debug('Reading file for {}: {}'.format(cur_time,fname))
-                    try:
-                        h4_file = h4.SD(path.encode('ascii'))
-                        ts = h4_file.select('time').get()
-                        lats = h4_file.select('latitude').get()
-                        longs = h4_file.select('longitude').get()
-                        numlats,numlongs = len(lats),len(longs)
+                    if m is not None:
+                        # Calculate index of starting hour from beginning of year
+                        cur_time = datetime.datetime.strptime(m.group('date'), '%Y%m%d')
+                        start_hour = int((cur_time - start_time).total_seconds()/3600)
+                        logger.debug('Reading file for {}: {}'.format(cur_time,fname))
+                        try:
+                            h4_file = h4.SD(path.encode('ascii'))
+                            ts = h4_file.select('time').get()
+                            lats = h4_file.select('latitude').get()
+                            longs = h4_file.select('longitude').get()
+                            numlats,numlongs = len(lats),len(longs)
 
-                        # Create latitude and longitude from input file if not found in output
-                        if any(k not in outfile for k in ['latitude','longitude','time']):
-                            logger.debug('Creating lat/long and time sets with lengths {}, {} and {}.'.format(numlats,numlongs,numhours))
-                            outfile['latitude'] = lats
-                            outfile['longitude'] = longs
-                            outfile.create_dataset('time',data=map(utils.to_timestamp,hours),dtype='int64')
+                            # Create latitude and longitude from input file if not found in output
+                            if any(k not in outfile for k in ['latitude','longitude','time']):
+                                logger.debug('Creating lat/long and time sets with lengths {}, {} and {}.'.format(numlats,numlongs,numhours))
+                                outfile['latitude'] = lats
+                                outfile['longitude'] = longs
+                                outfile.create_dataset('time',data=map(utils.to_timestamp,hours),dtype='int64')
 
-                        for v in (ds for  ds in h4_file.datasets() if ds not in  ['latitude','longitude','time']):
-                            if v.lower() not in outfile:
-                                logger.debug('Creating dataset {} with size ({},{},{}).'.format(v.lower(),numhours,numlats,numlongs))
-                                outfile.create_dataset(v.lower(),(numhours,numlats,numlongs))
-                            
-                            data = h4_file.select(v).get()
-                            logger.debug('Assign \'{}\', time steps {}:{}, data with shape {}'.format(v,start_hour,start_hour+len(ts),str(data.shape)))
-                            outfile[v.lower()][start_hour:start_hour+len(ts),:,:] = data
-
-
-                    except HDF4Error as e:
-                        logger.exception(e)
-                else:
-                    logger.warning('Filename could not be parsed: '+fname)
+                            for v in (ds for  ds in h4_file.datasets() if ds not in  ['latitude','longitude','time']):
+                                if v.lower() not in outfile:
+                                    logger.debug('Creating dataset {} with size ({},{},{}).'.format(v.lower(),numhours,numlats,numlongs))
+                                    outfile.create_dataset(v.lower(),(numhours,numlats,numlongs))
+                                
+                                data = h4_file.select(v).get()
+                                logger.debug('Assign \'{}\', time steps {}:{}, data with shape {}'.format(v,start_hour,start_hour+len(ts),str(data.shape)))
+                                outfile[v.lower()][start_hour:start_hour+len(ts),:,:] = data
 
 
-def clean_merra2(source,dest,ext='nc4',out_ext='hdf',datatype=None,**kwargs):
+                        except HDF4Error as e:
+                            logger.exception(e)
+                    else:
+                        logger.warning('Filename could not be parsed: '+fname)
+
+
+def clean_merra2(source,dest,skip_existing,ext='nc4',out_ext='hdf',datatype=None,**kwargs):
     """
     Concatenate MERRA2 data from separate files into one file for each year.
 
@@ -317,38 +321,42 @@ def clean_merra2(source,dest,ext='nc4',out_ext='hdf',datatype=None,**kwargs):
         numhours = len(hours)
         logger.debug('Listed {} hours during year {}.'.format(numhours,year))
         logger.info('Parsing {} data for year {}.'.format(dataset,year))
-        with h5py.File(os.path.join(dest,'{}.{}.{}'.format(dataset,year,out_ext))) as outfile:
-            for path in files:
-                logger.debug('Path is {} (type: {}).'.format(path,type(path)))
-                # Extract name of file only and search for date
-                fname = os.path.basename(path)
-                m = regex_d.search(fname)
+        out_path = os.path.join(dest,'{}.{}.{}'.format(dataset,year,out_ext))
+        if os.path.isfile(out_path) and skip_existing:
+            logger.info('{} exists. Skipping.'.format(out_path))
+        else:
+            with h5py.File(out_path) as outfile:
+                for path in files:
+                    logger.debug('Path is {} (type: {}).'.format(path,type(path)))
+                    # Extract name of file only and search for date
+                    fname = os.path.basename(path)
+                    m = regex_d.search(fname)
 
-                if m is not None:
-                    # Calculate index of starting hour from beginning of year
-                    cur_time = datetime.datetime.strptime(m.group('date'), '%Y%m%d')
-                    start_hour = int((cur_time - start_time).total_seconds()/3600)
-                    logger.debug('Reading file for {}: {}'.format(cur_time,fname))
-                    with h5py.File(path.encode('ascii')) as h5_file:
-                        ts = h5_file['time'][:]
-                        lats = h5_file['lat'][:]
-                        longs = h5_file['lon'][:]
-                        numlats,numlongs = len(lats),len(longs)
+                    if m is not None:
+                        # Calculate index of starting hour from beginning of year
+                        cur_time = datetime.datetime.strptime(m.group('date'), '%Y%m%d')
+                        start_hour = int((cur_time - start_time).total_seconds()/3600)
+                        logger.debug('Reading file for {}: {}'.format(cur_time,fname))
+                        with h5py.File(path.encode('ascii')) as h5_file:
+                            ts = h5_file['time'][:]
+                            lats = h5_file['lat'][:]
+                            longs = h5_file['lon'][:]
+                            numlats,numlongs = len(lats),len(longs)
 
-                        # Create latitude and longitude from input file if not found in output
-                        if any(k not in outfile for k in ['latitude','longitude','time']):
-                            logger.debug('Creating lat/long and time sets with lengths {}, {} and {}.'.format(numlats,numlongs,numhours))
-                            outfile['latitude'] = lats
-                            outfile['longitude'] = longs
-                            outfile.create_dataset('time',data=map(utils.to_timestamp,hours),dtype='int64')
+                            # Create latitude and longitude from input file if not found in output
+                            if any(k not in outfile for k in ['latitude','longitude','time']):
+                                logger.debug('Creating lat/long and time sets with lengths {}, {} and {}.'.format(numlats,numlongs,numhours))
+                                outfile['latitude'] = lats
+                                outfile['longitude'] = longs
+                                outfile.create_dataset('time',data=map(utils.to_timestamp,hours),dtype='int64')
 
-                        for v in (ds for  ds in h5_file if ds not in  ['lat','lon','time']):
-                            if v.lower() not in outfile:
-                                logger.debug('Creating dataset {} with size ({},{},{}).'.format(v.lower(),numhours,numlats,numlongs))
-                                outfile.create_dataset(v.lower(),(numhours,numlats,numlongs))
-                            
-                            data = h5_file[v][:]
-                            logger.debug('Assign \'{}\', time steps {}:{}, data with shape {}'.format(v.lower(),start_hour,start_hour+len(ts),str(data.shape)))
-                            outfile[v.lower()][start_hour:start_hour+len(ts),:,:] = data
-                else:
-                    logger.warning('Filename could not be parsed: '+fname)
+                            for v in (ds for  ds in h5_file if ds not in  ['lat','lon','time']):
+                                if v.lower() not in outfile:
+                                    logger.debug('Creating dataset {} with size ({},{},{}).'.format(v.lower(),numhours,numlats,numlongs))
+                                    outfile.create_dataset(v.lower(),(numhours,numlats,numlongs))
+                                
+                                data = h5_file[v][:]
+                                logger.debug('Assign \'{}\', time steps {}:{}, data with shape {}'.format(v.lower(),start_hour,start_hour+len(ts),str(data.shape)))
+                                outfile[v.lower()][start_hour:start_hour+len(ts),:,:] = data
+                    else:
+                        logger.warning('Filename could not be parsed: '+fname)

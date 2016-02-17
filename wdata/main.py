@@ -64,6 +64,8 @@ def download(years,datasource,logfile,dest,**kwargs):
 @click.option('--dest','-d',type=click.Path(exists=True),required=True)
 @click.option('--year','-y',type=int,required=False)
 @click.option('--datatype','-t',type=click.Choice(['wind', 'solar']),required=False)
+@click.option('--skip-existing/--no-skip-existing',default=True,
+    help='skip cleaning if output file already exists (default True)')
 def clean(datasource,**kwargs):
     if 'merra' in datasource:
         import merra
