@@ -209,7 +209,7 @@ def clean_merra(source,dest,skip_existing,ext='hdf',out_ext='hdf',datatype=None,
         ext (str): extension for data files
         datatype: either 'wind','solar', or None
     """
-    logger.debug('Applying MERRA2 data cleaning function.')
+    logger.debug('Applying MERRA data cleaning function.')
 
     import h5py
     import pyhdf.SD as h4
